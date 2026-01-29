@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Pinball Pro Web</title>
+    <title>Pinball Pro Web Fixed</title>
     <style>
-        body { margin: 0; background: #000; color: #0ff; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; touch-action: none; }
-        #ui { position: absolute; top: 10px; width: 100%; display: flex; justify-content: space-around; pointer-events: none; z-index: 10; }
-        #msg { position: absolute; top: 45%; width: 100%; text-align: center; font-size: 32px; font-weight: bold; color: #ff0055; display: none; text-shadow: 0 0 10px #ff0055; }
-        #power-bar { position: absolute; right: 10px; bottom: 20px; width: 10px; height: 100px; border: 1px solid #ffaa00; display: flex; align-items: flex-end; }
-        #power-fill { width: 100%; height: 0%; background: #ffaa00; transition: height 0.1s; }
-        canvas { display: block; margin: 0 auto; box-shadow: 0 0 30px #002222; }
+        body { margin: 0; background: #000; color: #0ff; overflow: hidden; font-family: sans-serif; touch-action: none; }
+        #ui { position: absolute; top: 10px; width: 100%; display: flex; justify-content: space-around; pointer-events: none; z-index: 100; font-weight: bold; }
+        #msg { position: absolute; top: 45%; width: 100%; text-align: center; font-size: 32px; color: #ff0055; display: none; z-index: 100; }
+        #power-bar { position: absolute; right: 10px; bottom: 20px; width: 15px; height: 150px; border: 2px solid #ffaa00; display: flex; align-items: flex-end; z-index: 100; }
+        #power-fill { width: 100%; height: 0%; background: #ffaa00; }
+        canvas { display: block; margin: 0 auto; background: #080808 !important; }
     </style>
 </head>
 <body>
@@ -21,19 +21,141 @@
     </div>
 
     <div id="power-bar"><div id="power-fill"></div></div>
-    <div id="msg">GAME OVER<br><button onclick="location.reload()" style="padding:10px 20px; cursor:pointer; background:#0ff; border:none; margin-top:10px;">MAIN LAGI</button></div>
+    
+    <div id="msg">
+        GAME OVER<br>
+        <button onclick="location.reload()" style="padding:15px 30px; cursor:pointer; background:#0ff; border:none; margin-top:20px; font-weight:bold;">MAIN LAGI</button>
+    </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+    
     <script>
-        const { Engine, Render, Runner, Bodies, Composite, Body, Constraint, Events } = Matter;
+        // Memastikan kode jalan SETELAH library Matter dimuat
+        window.onload = () => {
+            const { Engine, Render, Runner, Bodies, Composite, Body, Constraint, Events } = Matter;
 
-        const engine = Engine.create();
-        const width = 400;
-        const height = window.innerHeight;
-        let score = 0;
-        let ballLeft = 5;
-        let power = 0;
-        let isGameOver = false;
+            const engine = Engine.create();
+            const width = 400;
+            const height = window.innerHeight;
+            let score = 0;
+            let ballLeft = 5;
+            let power = 0;
+            let isGameOver = false;
 
-        const render = Render.create({
-            element: document.body
+            // Buat Render
+            const render = Render.create({
+                element: document.body,
+                engine: engine,
+                options: {
+                    width: width,
+                    height: height,
+                    wireframes: false, // Pastikan ini false agar warna muncul
+                    background: '#080808'
+                }
+            });
+
+            // 1. DINDING DAN LANTAI
+            const wallOpt = { isStatic: true, render: { fillStyle: '#222' }, restitution: 0.5 };
+            const walls = [
+                Bodies.rectangle(width/2, 5, width, 20, wallOpt), // Atas
+                Bodies.rectangle(5, height/2, 20, height, wallOpt), // Kiri
+                Bodies.rectangle(width-5, height/2, 20, height, wallOpt), // Kanan
+                Bodies.rectangle(width-55, height-150, 10, height, wallOpt), // Jalur Peluncur
+                Bodies.rectangle(width-25, height-5, 60, 20, wallOpt), // Lantai Home
+                // Pengarah miring
+                Bodies.rectangle(60, 80, 150, 20, { isStatic: true, angle: 0.7, render: { fillStyle: '#333' } }),
+                Bodies.rectangle(width-110, 80, 150, 20, { isStatic: true, angle: -0.7, render: { fillStyle: '#333' } }),
+                // Corong bawah
+                Bodies.rectangle(50, height-200, 150, 25, { isStatic: true, angle: 0.8, render: { fillStyle: '#222' } }),
+                Bodies.rectangle(width-145, height-200, 150, 25, { isStatic: true, angle: -0.8, render: { fillStyle: '#222' } })
+            ];
+
+            // 2. FLIPPER
+            function createFlipper(x, y, side) {
+                const f = Bodies.rectangle(x, y, 90, 20, { 
+                    chamfer: { radius: 10 }, 
+                    render: { fillStyle: '#ff0055' },
+                    collisionFilter: { group: -1 } 
+                });
+                const pivotX = side === 'left' ? x - 40 : x + 40;
+                const pivot = Constraint.create({
+                    pointA: { x: pivotX, y: y },
+                    bodyB: f,
+                    pointB: { x: side === 'left' ? -40 : 40, y: 0 },
+                    stiffness: 1, length: 0, render: { visible: false }
+                });
+                return { body: f, pivot };
+            }
+            const leftF = createFlipper(140, height - 130, 'left');
+            const rightF = createFlipper(width - 190, height - 130, 'right');
+
+            // 3. BUMPER
+            const bumpers = [
+                Bodies.circle(130, 250, 30, { isStatic: true, restitution: 1.6, render: { fillStyle: '#00f2ff' } }),
+                Bodies.circle(270, 250, 30, { isStatic: true, restitution: 1.6, render: { fillStyle: '#00f2ff' } }),
+                Bodies.circle(200, 400, 35, { isStatic: true, restitution: 1.6, render: { fillStyle: '#77ff00' } })
+            ];
+
+            // 4. BOLA
+            let ball = Bodies.circle(width - 25, height - 40, 14, {
+                restitution: 0.5, mass: 1, render: { fillStyle: '#fff' }
+            });
+
+            Composite.add(engine.world, [...walls, ...bumpers, leftF.body, leftF.pivot, rightF.body, rightF.pivot, ball]);
+
+            // 5. INPUT
+            const keys = {};
+            document.addEventListener('keydown', e => {
+                keys[e.code] = true;
+                if(e.code === 'Space' && !isGameOver) {
+                    power = Math.min(power + 0.005, 0.2);
+                    document.getElementById('power-fill').style.height = (power * 500) + '%';
+                }
+            });
+            document.addEventListener('keyup', e => {
+                keys[e.code] = false;
+                if(e.code === 'Space' && !isGameOver) {
+                    Body.applyForce(ball, ball.position, { x: 0, y: -power });
+                    power = 0;
+                    document.getElementById('power-fill').style.height = '0%';
+                }
+            });
+
+            // 6. LOOP UTAMA
+            Events.on(engine, 'beforeUpdate', () => {
+                if (keys['ArrowLeft']) Body.setAngularVelocity(leftF.body, -0.4);
+                else Body.setAngle(leftF.body, 0.4);
+
+                if (keys['ArrowRight']) Body.setAngularVelocity(rightF.body, 0.4);
+                else Body.setAngle(rightF.body, -0.4);
+
+                if(ball.position.y > height + 50 && !isGameOver) {
+                    ballLeft--;
+                    document.getElementById('ballCount').innerText = ballLeft;
+                    if(ballLeft <= 0) {
+                        isGameOver = true;
+                        document.getElementById('msg').style.display = 'block';
+                    } else {
+                        Body.setPosition(ball, { x: width - 25, y: height - 40 });
+                        Body.setVelocity(ball, { x: 0, y: 0 });
+                    }
+                }
+            });
+
+            Events.on(engine, 'collisionStart', (e) => {
+                e.pairs.forEach(p => {
+                    if(bumpers.includes(p.bodyA) || bumpers.includes(p.bodyB)) {
+                        score += 100;
+                        document.getElementById('score').innerText = score;
+                    }
+                });
+            });
+
+            // Jalankan
+            Render.run(render);
+            const runner = Runner.create();
+            Runner.run(runner, engine);
+        };
+    </script>
+</body>
+</html>
