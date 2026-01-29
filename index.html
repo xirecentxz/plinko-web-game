@@ -1,22 +1,39 @@
-// --- PERBAIKAN BATAS RUANG (BOX GAME) ---
-const wallOpt = { isStatic: true, render: { fillStyle: '#222' } };
-const walls = [
-    // 1. Frame Luar
-    Bodies.rectangle(width/2, 5, width, 10, wallOpt), // Atap
-    Bodies.rectangle(5, height/2, 10, height, wallOpt), // Dinding Kiri
-    Bodies.rectangle(width-5, height/2, 10, height, wallOpt), // Dinding Kanan
-    
-    // 2. Lantai "Home" (Agar bola tidak jatuh saat reset)
-    Bodies.rectangle(width - 25, height - 10, 50, 20, wallOpt), 
-    
-    // 3. Jalur Peluncur (Plunger Lane)
-    Bodies.rectangle(width - 55, height - 130, 10, height - 100, wallOpt), 
-    
-    // 4. Corong Bawah (Mengarahkan bola ke flipper/lubang)
-    Bodies.rectangle(40, height - 150, 120, 20, { isStatic: true, angle: 0.7, render: { fillStyle: '#222' } }),
-    Bodies.rectangle(width - 110, height - 150, 100, 20, { isStatic: true, angle: -0.7, render: { fillStyle: '#222' } }),
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Pinball Pro Web</title>
+    <style>
+        body { margin: 0; background: #000; color: #0ff; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; touch-action: none; }
+        #ui { position: absolute; top: 10px; width: 100%; display: flex; justify-content: space-around; pointer-events: none; z-index: 10; }
+        #msg { position: absolute; top: 45%; width: 100%; text-align: center; font-size: 32px; font-weight: bold; color: #ff0055; display: none; text-shadow: 0 0 10px #ff0055; }
+        #power-bar { position: absolute; right: 10px; bottom: 20px; width: 10px; height: 100px; border: 1px solid #ffaa00; display: flex; align-items: flex-end; }
+        #power-fill { width: 100%; height: 0%; background: #ffaa00; transition: height 0.1s; }
+        canvas { display: block; margin: 0 auto; box-shadow: 0 0 30px #002222; }
+    </style>
+</head>
+<body>
 
-    // 5. Pengarah Atap (Pojok Atas)
-    Bodies.rectangle(50, 50, 150, 20, { isStatic: true, angle: 0.8, render: { fillStyle: '#333' } }),
-    Bodies.rectangle(width-50, 50, 150, 20, { isStatic: true, angle: -0.8, render: { fillStyle: '#333' } })
-];
+    <div id="ui">
+        <div>SKOR: <span id="score">0</span></div>
+        <div>BOLA: <span id="ballCount">5</span>/5</div>
+    </div>
+
+    <div id="power-bar"><div id="power-fill"></div></div>
+    <div id="msg">GAME OVER<br><button onclick="location.reload()" style="padding:10px 20px; cursor:pointer; background:#0ff; border:none; margin-top:10px;">MAIN LAGI</button></div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
+    <script>
+        const { Engine, Render, Runner, Bodies, Composite, Body, Constraint, Events } = Matter;
+
+        const engine = Engine.create();
+        const width = 400;
+        const height = window.innerHeight;
+        let score = 0;
+        let ballLeft = 5;
+        let power = 0;
+        let isGameOver = false;
+
+        const render = Render.create({
+            element: document.body
