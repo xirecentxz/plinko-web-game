@@ -3,166 +3,161 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Pinball Pro - Final Wrap</title>
+    <title>Plinko Web Game</title>
     <style>
-        /* Memastikan body tidak bisa scroll dan konten di tengah */
-        body { margin: 0; background: #000; overflow: hidden; display: flex; justify-content: center; align-items: center; height: 100vh; touch-action: none; }
+        body { margin: 0; background: #1a1a2e; color: #fff; overflow: hidden; font-family: 'Press Start 2P', cursive; /* Gaya font retro */ display: flex; justify-content: center; align-items: center; height: 100vh; touch-action: none; }
         
-        /* Box utama dengan ukuran tetap */
-        #game-box { position: relative; width: 400px; height: 600px; background: #050505; border: 4px solid #333; box-shadow: 0 0 20px rgba(0,255,255,0.2); }
+        @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap'); /* Import font dari Google Fonts */
+
+        #game-container { position: relative; width: 400px; height: 600px; background: #2a2a4a; border: 4px solid #6a00ff; box-shadow: 0 0 30px rgba(106,0,255,0.7); overflow: hidden; }
         
-        /* UI di dalam box */
-        #ui { position: absolute; top: 10px; width: 100%; display: flex; justify-content: space-around; color: #0ff; font-family: monospace; font-size: 16px; z-index: 10; pointer-events: none; }
-        #power-bar { position: absolute; right: 8px; bottom: 20px; width: 8px; height: 80px; border: 1px solid #ffaa00; display: flex; align-items: flex-end; }
-        #power-fill { width: 100%; height: 0%; background: #ffaa00; }
-        #msg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); color: #ff0055; display: none; flex-direction: column; justify-content: center; align-items: center; z-index: 20; font-family: sans-serif; }
+        #ui { position: absolute; top: 10px; width: 100%; display: flex; justify-content: space-between; padding: 0 15px; box-sizing: border-box; z-index: 10; font-size: 16px; }
+        #score-display { text-align: right; }
+        #drop-button { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); padding: 10px 20px; background: #ffaa00; color: white; border: none; border-radius: 5px; cursor: pointer; font-family: 'Press Start 2P', cursive; font-size: 14px; z-index: 11; }
+        #message { position: absolute; bottom: 10px; width: 100%; text-align: center; color: #00ffaa; font-size: 14px; z-index: 10; }
     </style>
 </head>
 <body>
 
-    <div id="game-box">
+    <div id="game-container">
         <div id="ui">
-            <div>SKOR: <span id="score">0</span></div>
-            <div>BOLA: <span id="ballCount">5</span>/5</div>
+            <div>Credits: <span id="credits">1000</span></div>
+            <div id="score-display">Win: <span id="winAmount">0</span></div>
         </div>
-        <div id="power-bar"><div id="power-fill"></div></div>
-        <div id="msg">
-            <h1>GAME OVER</h1>
-            <button onclick="location.reload()" style="padding:10px 20px; background:#0ff; border:none; cursor:pointer; font-weight:bold;">MAIN LAGI</button>
-        </div>
+        <button id="drop-button">DROP BALL (10 Credits)</button>
+        <div id="message"></div>
     </div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/matter-js/0.19.0/matter.min.js"></script>
     <script>
         window.onload = () => {
-            const { Engine, Render, Runner, Bodies, Composite, Body, Constraint, Events } = Matter;
+            const { Engine, Render, Runner, Bodies, Composite, Events } = Matter;
 
-            const box = document.getElementById('game-box');
-            const width = 400;
-            const height = 600;
+            const container = document.getElementById('game-container');
+            const width = container.clientWidth;
+            const height = container.clientHeight;
 
             const engine = Engine.create();
-            let score = 0;
-            let ballLeft = 5;
-            let power = 0;
-            let isGameOver = false;
+            const world = engine.world;
+            world.gravity.y = 1; // Gravitasi normal
+
+            let credits = 1000;
+            let winAmount = 0;
+            const dropCost = 10;
+            let lastBall = null; // Untuk melacak bola yang baru jatuh
 
             const render = Render.create({
-                element: box,
+                element: container,
                 engine: engine,
                 options: { width, height, wireframes: false, background: 'transparent' }
             });
 
-            // --- FISIKA PAPAN (TERTUTUP RAPAT) ---
-            const wallOpt = { isStatic: true, render: { fillStyle: '#151515' }, restitution: 0.6 };
-            
+            // --- OBJEK PLINKO ---
+            const wallOpt = { isStatic: true, render: { fillStyle: '#3a3a5a' }, restitution: 0.8 };
+            const pegOpt = { isStatic: true, render: { fillStyle: '#884dff' }, restitution: 0.9, circleRadius: 5 }; // Pasak
+
+            // Dinding Luar
             const walls = [
-                Bodies.rectangle(200, 10, 400, 20, wallOpt), // ATAP SOLID
-                Bodies.rectangle(10, 300, 20, 600, wallOpt), // DINDING KIRI
-                Bodies.rectangle(390, 300, 20, 600, wallOpt), // DINDING KANAN
-                
-                // JALUR PELUNCUR
-                Bodies.rectangle(350, 450, 10, 300, wallOpt), // Sekat jalur
-                Bodies.rectangle(375, 595, 50, 10, wallOpt), // Lantai rumah bola
-                
-                // PENGARAH ATAS (Mencegah bola nyangkut di pojok)
-                Bodies.rectangle(60, 60, 150, 20, { isStatic: true, angle: 0.7, render: { fillStyle: '#252525' } }),
-                Bodies.rectangle(300, 60, 150, 20, { isStatic: true, angle: -0.7, render: { fillStyle: '#252525' } }),
-
-                // CORONG BAWAH
-                Bodies.rectangle(60, 520, 140, 20, { isStatic: true, angle: 0.7, render: { fillStyle: '#222' } }),
-                Bodies.rectangle(290, 520, 140, 20, { isStatic: true, angle: -0.7, render: { fillStyle: '#222' } })
+                Bodies.rectangle(width / 2, 5, width, 10, wallOpt), // Atas
+                Bodies.rectangle(5, height / 2, 10, height, wallOpt), // Kiri
+                Bodies.rectangle(width - 5, height / 2, 10, height, wallOpt), // Kanan
             ];
 
-            // --- FLIPPER ---
-            function createFlipper(x, y, side) {
-                const f = Bodies.rectangle(x, y, 80, 18, { 
-                    chamfer: { radius: 9 }, render: { fillStyle: '#ff0055' }, collisionFilter: { group: -1 } 
-                });
-                const pivotX = side === 'left' ? x - 35 : x + 35;
-                const pivot = Constraint.create({
-                    pointA: { x: pivotX, y: y }, bodyB: f, pointB: { x: side === 'left' ? -35 : 35, y: 0 },
-                    stiffness: 1, length: 0, render: { visible: false }
-                });
-                return { body: f, pivot };
+            // Pasak Piramida
+            const pegs = [];
+            const pegRadius = 5;
+            const pegSpacingX = 30;
+            const pegSpacingY = 25;
+            const startY = 100;
+
+            for (let row = 0; row < 12; row++) {
+                const numPegs = row + 1;
+                const rowWidth = numPegs * pegSpacingX;
+                const startX = (width - rowWidth) / 2 + pegRadius;
+                for (let i = 0; i < numPegs; i++) {
+                    pegs.push(Bodies.circle(startX + i * pegSpacingX, startY + row * pegSpacingY, pegRadius, pegOpt));
+                }
             }
-            const leftF = createFlipper(135, 550, 'left');
-            const rightF = createFlipper(215, 550, 'right');
 
-            // --- BUMPER ---
-            const bumpers = [
-                Bodies.circle(130, 200, 25, { isStatic: true, restitution: 1.5, render: { fillStyle: '#00f2ff' } }),
-                Bodies.circle(270, 200, 25, { isStatic: true, restitution: 1.5, render: { fillStyle: '#00f2ff' } }),
-                Bodies.circle(200, 330, 30, { isStatic: true, restitution: 1.5, render: { fillStyle: '#77ff00' } })
-            ];
+            // Slot Skor di Bawah
+            const slotValues = [10, 50, 100, 20, 5, 20, 100, 50, 10]; // Nilai untuk setiap slot
+            const numSlots = slotValues.length;
+            const slotWidth = width / numSlots;
+            const slots = [];
 
-            // --- BOLA ---
-            let ball = Bodies.circle(375, 570, 12, {
-                restitution: 0.5, mass: 1, render: { fillStyle: '#fff' }
-            });
+            for (let i = 0; i < numSlots; i++) {
+                const x = (i * slotWidth) + (slotWidth / 2);
+                const value = slotValues[i];
+                const color = i % 2 === 0 ? '#00ffaa' : '#ff5500'; // Warna bergantian
 
-            Composite.add(engine.world, [...walls, ...bumpers, leftF.body, leftF.pivot, rightF.body, rightF.pivot, ball]);
+                // Sensor untuk deteksi bola masuk
+                const sensor = Bodies.rectangle(x, height - 15, slotWidth - 5, 10, {
+                    isStatic: true, isSensor: true, label: `slot-${value}`, render: { fillStyle: color, opacity: 0.3 }
+                });
+                slots.push(sensor);
 
-            // --- KONTROL ---
-            const keys = {};
-            document.addEventListener('keydown', e => {
-                keys[e.code] = true;
-                if(e.code === 'Space' && !isGameOver) {
-                    power = Math.min(power + 0.005, 0.2);
-                    document.getElementById('power-fill').style.height = (power * 500) + '%';
+                // Pembatas antar slot
+                const divider = Bodies.rectangle(x + slotWidth / 2, height - 50, 5, 100, wallOpt);
+                slots.push(divider);
+            }
+
+            Composite.add(world, [...walls, ...pegs, ...slots]);
+
+            // --- FUNGSI JATUHKAN BOLA ---
+            const dropBall = () => {
+                if (credits < dropCost) {
+                    document.getElementById('message').innerText = 'Not enough credits!';
+                    return;
                 }
-            });
-            document.addEventListener('keyup', e => {
-                keys[e.code] = false;
-                if(e.code === 'Space' && !isGameOver) {
-                    Body.applyForce(ball, ball.position, { x: 0, y: -power });
-                    power = 0;
-                    document.getElementById('power-fill').style.height = '0%';
-                }
-            });
+                credits -= dropCost;
+                document.getElementById('credits').innerText = credits;
+                document.getElementById('message').innerText = ''; // Hapus pesan sebelumnya
 
-            // Touch Support (Batas area di dalam box)
-            box.addEventListener('touchstart', e => {
-                const x = e.touches[0].clientX - box.offsetLeft;
-                if(x > 340) power = 0.16;
-                else if(x < 200) keys['ArrowLeft'] = true;
-                else keys['ArrowRight'] = true;
-            });
-            box.addEventListener('touchend', () => {
-                if(power > 0) { Body.applyForce(ball, ball.position, { x: 0, y: -power }); power = 0; }
-                keys['ArrowLeft'] = false; keys['ArrowRight'] = false;
-            });
+                const ball = Bodies.circle(width / 2 + (Math.random() * 20 - 10), 50, 10, {
+                    restitution: 0.8, // Pantulan
+                    friction: 0.001, // Gesekan kecil
+                    render: { fillStyle: '#ffdd00' }, // Warna bola
+                    label: 'plinko-ball'
+                });
+                Composite.add(world, ball);
+                lastBall = ball; // Tandai bola ini sebagai yang baru jatuh
+            };
 
-            // --- LOOP ---
-            Events.on(engine, 'beforeUpdate', () => {
-                if (keys['ArrowLeft']) Body.setAngularVelocity(leftF.body, -0.4);
-                else Body.setAngle(leftF.body, 0.3);
+            document.getElementById('drop-button').addEventListener('click', dropBall);
 
-                if (keys['ArrowRight']) Body.setAngularVelocity(rightF.body, 0.4);
-                else Body.setAngle(rightF.body, -0.3);
+            // --- DETEKSI SKOR ---
+            Events.on(engine, 'collisionStart', (event) => {
+                event.pairs.forEach(pair => {
+                    const bodyA = pair.bodyA;
+                    const bodyB = pair.bodyB;
 
-                if(ball.position.y > 620 && !isGameOver) {
-                    ballLeft--;
-                    document.getElementById('ballCount').innerText = ballLeft;
-                    if(ballLeft <= 0) {
-                        isGameOver = true;
-                        document.getElementById('msg').style.display = 'flex';
-                    } else {
-                        Body.setPosition(ball, { x: 375, y: 570 });
-                        Body.setVelocity(ball, { x: 0, y: 0 });
-                    }
-                }
-            });
+                    // Pastikan yang bertabrakan adalah bola dan sensor slot
+                    if ((bodyA.label === 'plinko-ball' && bodyB.label.startsWith('slot-')) ||
+                        (bodyB.label === 'plinko-ball' && bodyA.label.startsWith('slot-'))) {
+                        
+                        const ball = bodyA.label === 'plinko-ball' ? bodyA : bodyB;
+                        const slot = bodyA.label.startsWith('slot-') ? bodyA : bodyB;
 
-            Events.on(engine, 'collisionStart', (e) => {
-                e.pairs.forEach(p => {
-                    if(bumpers.includes(p.bodyA) || bumpers.includes(p.bodyB)) {
-                        score += 100;
-                        document.getElementById('score').innerText = score;
+                        // Pastikan ini adalah bola yang baru masuk slot, bukan bola lama yang mental lagi
+                        if (ball === lastBall) {
+                            const value = parseInt(slot.label.split('-')[1]);
+                            winAmount += value;
+                            credits += value;
+                            document.getElementById('winAmount').innerText = winAmount;
+                            document.getElementById('credits').innerText = credits;
+                            document.getElementById('message').innerText = `You won ${value} credits!`;
+
+                            // Hapus bola setelah mendapatkan skor
+                            setTimeout(() => {
+                                Composite.remove(world, ball);
+                                lastBall = null; // Reset lastBall
+                            }, 500); // Beri waktu sebentar agar terlihat masuk
+                        }
                     }
                 });
             });
 
+            // --- RUN GAME ---
             Render.run(render);
             Runner.run(Runner.create(), engine);
         };
